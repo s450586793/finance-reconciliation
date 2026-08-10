@@ -143,12 +143,19 @@ all_binds = [source for service in services.values() for source, _ in bind_targe
 if all_binds.count("/var/run/docker.sock") != 1:
     raise SystemExit("Docker socket must appear exactly once and only on updater")
 
-for name, service in services.items():
-    if set(service.get("networks", {})) != {"internal"}:
-        raise SystemExit(f"{name} must connect only to internal network")
+if set(services["db"].get("networks", {})) != {"internal"}:
+    raise SystemExit("db must connect only to internal network")
+if set(updater.get("networks", {})) != {"internal"}:
+    raise SystemExit("updater must connect only to internal network")
+if set(web.get("networks", {})) != {"internal", "edge"}:
+    raise SystemExit("web must connect to internal and edge networks")
 networks = config.get("networks")
-if not isinstance(networks, dict) or set(networks) != {"internal"} or networks["internal"].get("internal") is not True:
+if not isinstance(networks, dict) or set(networks) != {"internal", "edge"}:
+    raise SystemExit("compose must define internal and edge networks")
+if networks["internal"].get("internal") is not True:
     raise SystemExit("top-level internal network must be internal: true")
+if networks["edge"].get("internal") is True:
+    raise SystemExit("top-level edge network must permit host port publishing")
 
 if "env_file" in web:
     raise SystemExit("web must not receive deployment-only release environment")

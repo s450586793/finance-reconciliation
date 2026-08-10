@@ -1075,6 +1075,12 @@ def test_production_compose_uses_release_images_and_internal_service_boundaries(
         "FINREC_UPDATER_TOKEN": "u" * 32,
         "FINREC_COMPOSE_PROJECT": "finance-reconciliation",
     }
+    assert set(config["services"]["db"]["networks"]) == {"internal"}
+    assert set(config["services"]["updater"]["networks"]) == {"internal"}
+    assert set(web["networks"]) == {"internal", "edge"}
+    assert set(config["networks"]) == {"internal", "edge"}
+    assert config["networks"]["internal"]["internal"] is True
+    assert config["networks"]["edge"] is None
     assert compose.count("/var/run/docker.sock:/var/run/docker.sock") == 1
     assert "/volume4/docker/docker/finance-reconciliation/app:/config" in compose
     assert "/volume4/docker/docker/finance-reconciliation/data/updater-state:/state" in compose
