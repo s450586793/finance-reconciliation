@@ -237,8 +237,10 @@ def _image_json(
     os_name="linux",
     architecture="amd64",
     extra_digest=False,
+    repo_digests=None,
 ):
-    repo_digests = [f"{repo}@{digest}"]
+    if repo_digests is None:
+        repo_digests = [f"{repo}@{digest}"]
     if extra_digest:
         repo_digests.append(f"{repo}@{'sha256:' + 'e' * 64}")
     return json.dumps(
@@ -540,6 +542,7 @@ def test_resolve_stable_rejects_immutable_tag_identity_mismatch(immutable_output
         _image_json(TARGET_ID, TARGET_DIGEST, "v1.3.0", created=None),
         _image_json(TARGET_ID, TARGET_DIGEST, "v1.3.0", repo=REPOSITORY + "-updater"),
         _image_json(TARGET_ID, TARGET_DIGEST, "v1.3.0", extra_digest=True),
+        _image_json(TARGET_ID, TARGET_DIGEST, "v1.3.0", repo_digests=[]),
     ],
 )
 def test_resolve_stable_rejects_missing_or_ambiguous_identity(image_output):
@@ -969,6 +972,7 @@ def test_cleanup_steps_revalidate_and_remove_only_the_recorded_reference(
             ORIGINAL_DIGEST,
             "v1.2.3",
             tags=[ROLLBACK_ALIAS],
+            repo_digests=[],
         ),
         b"",
         b"",
@@ -1137,6 +1141,36 @@ def test_cleanup_alias_rejects_when_version_tag_is_still_present(tmp_path, monke
         )
 
     assert not any(call.argv[:3] == ("docker", "image", "rm") for call in runner.calls)
+
+
+def test_cleanup_alias_accepts_digest_removed_with_version_tag(tmp_path, monkeypatch):
+    runner = ScriptedRunner(
+        _image_json(
+            ORIGINAL_ID,
+            ORIGINAL_DIGEST,
+            "v1.2.3",
+            tags=[ROLLBACK_ALIAS],
+            repo_digests=[],
+        ),
+        b"",
+        b"",
+        f"{ORIGINAL_ID}\n".encode(),
+        b"untagged",
+        b"",
+    )
+    platform = _platform(runner, monkeypatch, env_file=_target_env(tmp_path))
+
+    platform.cleanup_original_step(
+        _task_with_cleanup_started(CleanupStep.ROLLBACK_ALIAS),
+        CleanupStep.ROLLBACK_ALIAS,
+    )
+
+    assert _argv(runner)[-2] == (
+        "docker",
+        "image",
+        "rm",
+        ROLLBACK_ALIAS,
+    )
 
 
 @pytest.mark.parametrize("step", tuple(CleanupStep))

@@ -361,7 +361,10 @@ class DockerPlatform:
                 self._cleanup_image_id(task)
                 return
 
-            inspected = self._inspect_image(task.original.image_id)
+            inspected = self._inspect_image(
+                task.original.image_id,
+                expected_digest_if_unavailable=task.original.digest,
+            )
             if not _same_image_core(inspected.identity, task.original):
                 raise ValueError("original_identity_mismatch")
             allowed_tags = {*task.original.tags, task.original.rollback_alias}
@@ -493,7 +496,12 @@ class DockerPlatform:
             raise ValueError("container_image_mismatch")
         return image
 
-    def _inspect_image(self, reference: str) -> _InspectedImage:
+    def _inspect_image(
+        self,
+        reference: str,
+        *,
+        expected_digest_if_unavailable: str | None = None,
+    ) -> _InspectedImage:
         result = self._runner.run(
             ("docker", "image", "inspect", "--format", IMAGE_FORMAT, reference),
             timeout=30,
@@ -533,11 +541,17 @@ class DockerPlatform:
             for value in payload["RepoDigests"]
             if value.startswith(digest_prefix)
         ]
-        if (
-            len(payload["RepoDigests"]) != 1
-            or len(repository_digests) != 1
-            or _DIGEST_PATTERN.fullmatch(repository_digests[0]) is None
+        if len(payload["RepoDigests"]) == 1 and len(repository_digests) == 1:
+            repository_digest = repository_digests[0]
+        elif (
+            payload["RepoDigests"] == []
+            and expected_digest_if_unavailable is not None
+            and _DIGEST_PATTERN.fullmatch(expected_digest_if_unavailable) is not None
         ):
+            repository_digest = expected_digest_if_unavailable
+        else:
+            raise ValueError("ambiguous_repository_digest")
+        if _DIGEST_PATTERN.fullmatch(repository_digest) is None:
             raise ValueError("ambiguous_repository_digest")
         published_at = _parse_utc(payload["Created"])
         version_tag = f"{_WEB_REPOSITORY}:{version}"
@@ -546,7 +560,7 @@ class DockerPlatform:
             identity=ImageIdentity(
                 repository=_WEB_REPOSITORY,
                 version=version,
-                digest=repository_digests[0],
+                digest=repository_digest,
                 image_id=payload["Id"],
                 tags=tags,
                 published_at=published_at,
