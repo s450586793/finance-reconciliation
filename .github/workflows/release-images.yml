@@ -244,7 +244,7 @@ jobs:
 
           stable_version() {
             inspect_log="$(mktemp)"
-            if version="$(docker buildx imagetools inspect "${stable_image}" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' 2>"${inspect_log}")"; then
+            if version="$(docker buildx imagetools inspect "${stable_image}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.version" }}' 2>"${inspect_log}")"; then
               rm -f "${inspect_log}"
               line_count="$(printf '%s\n' "${version}" | wc -l | tr -d ' ')"
               if [ "${line_count}" != "1" ] || ! printf '%s\n' "${version}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then

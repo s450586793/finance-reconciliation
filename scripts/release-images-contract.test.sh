@@ -790,6 +790,13 @@ if "finance-reconciliation-updater" in promote_run or ":latest" in promote_run:
 if "GITHUB_REF_NAME" not in promote_run and "steps.release.outputs.release_tag" not in promote_run:
     if "needs.preflight.outputs.release_tag" not in promote_run:
         raise SystemExit("promote-stable must target the current immutable release tag")
+stable_version_label_format = (
+    '{{ index .Image.Config.Labels "org.opencontainers.image.version" }}'
+)
+if stable_version_label_format not in promote_run:
+    raise SystemExit("promote-stable must read the stable OCI version from Buildx image metadata")
+if '{{ index .Config.Labels "org.opencontainers.image.version" }}' in promote_run:
+    raise SystemExit("promote-stable must not use the removed Buildx Config template field")
 
 promote_concurrency = promote_job.get("concurrency")
 if not isinstance(promote_concurrency, dict):
