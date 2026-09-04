@@ -914,6 +914,35 @@ def test_production_static_assets_collect_without_missing_references(
     assert (tmp_path / "staticfiles.json").is_file()
 
 
+def test_production_default_storage_persists_uploaded_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("DJANGO_ALLOWED_HOSTS", "localhost")
+    monkeypatch.setenv("CSRF_TRUSTED_ORIGINS", "https://localhost")
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "p" * 50)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://finance:long-production-password@db:5432/finance",
+    )
+    monkeypatch.setenv("COMPANY_TAX_ID", VALID_PRODUCTION_TAX_ID)
+    monkeypatch.setenv("FINREC_RELEASE_VERSION", "v0.1.0")
+    monkeypatch.setenv("FINREC_UPDATER_URL", "http://updater:8090")
+    monkeypatch.setenv("FINREC_UPDATER_TOKEN", "u" * 32)
+
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import storages
+    from django.test import override_settings
+
+    from config.settings import prod
+
+    with override_settings(MEDIA_ROOT=tmp_path, STORAGES=prod.STORAGES):
+        saved_name = storages["default"].save(
+            "imports/source.xlsx",
+            ContentFile(b"workbook"),
+        )
+
+    assert saved_name == "imports/source.xlsx"
+    assert (tmp_path / saved_name).read_bytes() == b"workbook"
+
+
 def test_production_settings_require_company_tax_id_without_leaking_a_value():
     result = _production_settings_process()
 

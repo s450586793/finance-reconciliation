@@ -121,6 +121,9 @@ EXPORT_ROOT = Path("/data/exports")
 BACKUP_ROOT = Path("/data/backups")
 
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
