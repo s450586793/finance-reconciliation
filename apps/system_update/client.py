@@ -16,6 +16,7 @@ from django.conf import settings
 
 UPDATER_URL = "http://updater:8090"
 REQUEST_TIMEOUT_SECONDS = 5
+IMAGE_RESOLUTION_TIMEOUT_SECONDS = 90
 MAX_RESPONSE_BYTES = 64 * 1024
 RESPONSE_READ_CHUNK_BYTES = 4 * 1024
 _VERSION_PATTERN = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -253,12 +254,18 @@ class UpdaterClient:
 
     def status(self) -> UpdaterStatusView:
         return self._parse_response(
-            _parse_status, self._request("GET", "/v1/status", None, 200)
+            _parse_status,
+            self._request(
+                "GET", "/v1/status", None, 200, REQUEST_TIMEOUT_SECONDS
+            ),
         )
 
     def check(self) -> UpdaterStatusView:
         return self._parse_response(
-            _parse_status, self._request("POST", "/v1/check", {}, 200)
+            _parse_status,
+            self._request(
+                "POST", "/v1/check", {}, 200, IMAGE_RESOLUTION_TIMEOUT_SECONDS
+            ),
         )
 
     def start(self, target_version: str, task_id: UUID) -> UpdaterTaskView:
@@ -275,6 +282,7 @@ class UpdaterClient:
                 "/v1/update",
                 {"target_version": target_version, "task_id": str(task_id)},
                 202,
+                IMAGE_RESOLUTION_TIMEOUT_SECONDS,
             ),
         )
         if task.id != task_id or task.to_version != target_version:
@@ -288,13 +296,20 @@ class UpdaterClient:
         except (TypeError, ValueError, UnicodeError):
             raise UpdaterUnavailable("invalid_response") from None
 
-    def _request(self, method: str, path: str, body: dict[str, str] | None, expected_status: int):
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, str] | None,
+        expected_status: int,
+        timeout_seconds: float,
+    ):
         data = None if body is None else json.dumps(body, separators=(",", ":")).encode("ascii")
         headers = {"Authorization": f"Bearer {self._token}", "Connection": "close"}
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = Request(f"{self._base_url}{path}", data=data, headers=headers, method=method)
-        deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        deadline = time.monotonic() + timeout_seconds
         try:
             response = self._transport(request, _remaining_seconds(deadline))
             with response:

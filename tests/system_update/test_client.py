@@ -123,7 +123,7 @@ def test_client_check_uses_fixed_authenticated_json_contract_and_parses_status()
     assert fake.last_request.data == b"{}"
     assert fake.last_request.get_header("Authorization") == f"Bearer {TOKEN}"
     assert fake.last_request.get_header("Content-type") == "application/json"
-    assert 0 < fake.timeout < 10
+    assert 48 < fake.timeout < 120
 
 
 def test_client_status_and_start_return_strict_public_views():
@@ -135,6 +135,7 @@ def test_client_status_and_start_return_strict_public_views():
     assert status.task.id == UUID(TASK["id"])
     assert status_transport.last_request.full_url == "http://updater:8090/v1/status"
     assert status_transport.last_request.data is None
+    assert 0 < status_transport.timeout < 10
 
     start_transport = FakeTransport(FakeResponse(_payload(TASK), status=202))
     started = UpdaterClient(
@@ -146,6 +147,7 @@ def test_client_status_and_start_return_strict_public_views():
         b'{"target_version":"v0.2.1",'
         b'"task_id":"00000000-0000-0000-0000-000000000001"}'
     )
+    assert 48 < start_transport.timeout < 120
 
 
 def test_client_accepts_nullable_current_publication_without_private_fields():
