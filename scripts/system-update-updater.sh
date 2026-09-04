@@ -515,7 +515,14 @@ fingerprint = {
     "Id": container["Id"],
     "Image": container["Image"],
     "StartedAt": state["StartedAt"],
-    "Mounts": mounts,
+    "Mounts": sorted(
+        mounts,
+        key=lambda mount: json.dumps(
+            mount,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    ),
 }
 descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
 try:
@@ -715,7 +722,7 @@ recover_original_updater() {
     "$scratch_dir/target.env" \
     "$scratch_dir/recovery-stat.json" \
     "$scratch_dir/restored-stat.json" || return 1
-  run_private "recovery-updater-up" compose up -d --no-deps updater || recovery_status=1
+  run_private "recovery-updater-up" compose up -d --no-deps --force-recreate updater || recovery_status=1
   wait_for_updater "$old_ref" "$scratch_dir/old-image-id" "recovery-updater" || recovery_status=1
   prove_services_unchanged "recovery" || recovery_status=1
   return "$recovery_status"
@@ -875,7 +882,7 @@ atomic_replace_environment \
   "$scratch_dir/target-stat.json" \
   "$scratch_dir/env-mutated" || exit 1
 
-run_private "new-updater-up" compose up -d --no-deps updater || exit 1
+run_private "new-updater-up" compose up -d --no-deps --force-recreate updater || exit 1
 wait_for_updater "$target_ref" "$scratch_dir/new-image-id" "new-updater" || exit 1
 prove_services_unchanged "success" || exit 1
 

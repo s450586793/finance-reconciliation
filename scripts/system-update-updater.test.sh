@@ -481,10 +481,11 @@ def save_state(value: dict[str, int]) -> None:
     os.chmod(STATE_PATH, 0o600)
 
 
-def log(action: str, service: str | None = None) -> None:
+def log(action: str, service: str | None = None, **details: object) -> None:
     payload = {"action": action}
     if service is not None:
         payload["service"] = service
+    payload.update(details)
     with LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
     os.chmod(LOG_PATH, 0o600)
@@ -516,6 +517,12 @@ def container_payload(container_id: str, up_count: int) -> dict[str, object]:
         started_at = "2026-08-08T01:01:00Z"
         if SCENARIO == "web_drift" and up_count >= 1:
             started_at = "2026-08-08T01:09:00Z"
+        mounts = [
+            {"Type": "bind", "Source": "/private/uploads", "Destination": "/data/uploads", "RW": True},
+            {"Type": "bind", "Source": "/private/exports", "Destination": "/data/exports", "RW": True},
+        ]
+        if SCENARIO == "mount_order_variation" and up_count >= 1:
+            mounts.reverse()
         return {
             "Id": WEB_ID,
             "Image": "sha256:" + "d" * 64,
@@ -527,10 +534,7 @@ def container_payload(container_id: str, up_count: int) -> dict[str, object]:
                     "com.docker.compose.service": "web",
                 },
             },
-            "Mounts": [
-                {"Type": "bind", "Source": "/private/uploads", "Destination": "/data/uploads", "RW": True},
-                {"Type": "bind", "Source": "/private/exports", "Destination": "/data/exports", "RW": True},
-            ],
+            "Mounts": mounts,
         }
 
     is_new = container_id == NEW_UPDATER_ID
@@ -542,6 +546,7 @@ def container_payload(container_id: str, up_count: int) -> dict[str, object]:
     if is_new and (
         SCENARIO in {"updater_identity_mismatch", "recovery_cleanup_rm_failure"}
         or SCENARIO in RECOVERY_VALIDATION_SCENARIOS
+        or SCENARIO == "recovery_requires_force_recreate"
     ):
         project = "other-project"
     if is_recovery and SCENARIO == "recovery_project_mismatch":
@@ -635,8 +640,23 @@ if args[: len(COMPOSE_PREFIX)] == COMPOSE_PREFIX:
             sys.stderr.write(RAW)
             raise SystemExit(97)
         raise SystemExit(0)
-    if subcommand == ["up", "-d", "--no-deps", "updater"]:
-        log("compose-up", "updater")
+    accepted_up_commands = {
+        ("up", "-d", "--no-deps", "updater"),
+        ("up", "-d", "--no-deps", "--force-recreate", "updater"),
+    }
+    if tuple(subcommand) in accepted_up_commands:
+        force_recreate = "--force-recreate" in subcommand
+        if SCENARIO == "recovery_requires_force_recreate":
+            log("compose-up", "updater", force_recreate=force_recreate)
+        else:
+            log("compose-up", "updater")
+        if (
+            SCENARIO == "recovery_requires_force_recreate"
+            and state["up"] >= 1
+            and not force_recreate
+        ):
+            save_state(state)
+            raise SystemExit(0)
         state["up"] += 1
         save_state(state)
         if SCENARIO == "recovery_failure" and state["up"] >= 2:
@@ -1806,6 +1826,61 @@ if [ "${FINREC_TEST_BATCH:-}" = "B_CLEANUP" ]; then
   fixed_fixture_created=0
   [ "$replacement_survived" -eq 1 ] || fail_test "fixture cleanup deleted a replaced fixed path"
   printf 'system-update-updater batch B cleanup contract tests passed\n'
+  exit 0
+fi
+
+if [ "${FINREC_TEST_BATCH:-}" = "C3" ]; then
+  printf '# Token=private-token\r\nFINREC_UPDATER_IMAGE_TAG=v1.2.3\r\nOPAQUE=private-password' >"$suite_dir/original.env"
+  printf '# Token=private-token\r\nFINREC_UPDATER_IMAGE_TAG=v1.2.4\r\nOPAQUE=private-password' >"$suite_dir/target.env"
+  printf 'services: {}\n' >"$suite_dir/compose.yml"
+  sudo -n install -o root -g root -m 0644 "$suite_dir/compose.yml" "$fixed_app_dir/compose.yml"
+
+  run_update_case "mount_order_variation" 0
+  [ "$(<"$LAST_STDOUT_FILE")" = "updater update completed" ] || {
+    fail_test "equivalent mount ordering did not preserve updater success"
+  }
+  [ ! -s "$LAST_STDERR_FILE" ] || fail_test "equivalent mount ordering wrote stderr"
+  assert_target_env
+  printf 'system-update-updater batch C3 contract tests passed\n'
+  exit 0
+fi
+
+if [ "${FINREC_TEST_BATCH:-}" = "C4" ]; then
+  printf '# Token=private-token\r\nFINREC_UPDATER_IMAGE_TAG=v1.2.3\r\nOPAQUE=private-password' >"$suite_dir/original.env"
+  printf '# Token=private-token\r\nFINREC_UPDATER_IMAGE_TAG=v1.2.4\r\nOPAQUE=private-password' >"$suite_dir/target.env"
+  printf 'services: {}\n' >"$suite_dir/compose.yml"
+  sudo -n install -o root -g root -m 0644 "$suite_dir/compose.yml" "$fixed_app_dir/compose.yml"
+
+  mapfile -t evidence_before < <(
+    sudo -n find /var/tmp -mindepth 1 -maxdepth 1 -type d -name 'finance-reconciliation-updater-update.*' -printf '%f\n' | sort
+  )
+  run_update_case "recovery_requires_force_recreate" 1
+  assert_fixed_update_failure
+  assert_original_env
+  python3 - "$LAST_LOG_FILE" "$LAST_STATE_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+entries = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()]
+state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+up_calls = [entry for entry in entries if entry.get("action") == "compose-up"]
+expected = [
+    {"action": "compose-up", "service": "updater", "force_recreate": True},
+    {"action": "compose-up", "service": "updater", "force_recreate": True},
+]
+if up_calls != expected:
+    raise SystemExit(f"updater replacement was not forced: {up_calls!r}")
+if state.get("up") != 2:
+    raise SystemExit(f"recovery did not restore the original updater: {state!r}")
+PY
+  mapfile -t evidence_after < <(
+    sudo -n find /var/tmp -mindepth 1 -maxdepth 1 -type d -name 'finance-reconciliation-updater-update.*' -printf '%f\n' | sort
+  )
+  [ "${evidence_after[*]}" = "${evidence_before[*]}" ] || {
+    fail_test "successful forced recovery retained a new evidence directory"
+  }
+  printf 'system-update-updater batch C4 contract tests passed\n'
   exit 0
 fi
 
