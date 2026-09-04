@@ -124,6 +124,8 @@ done
 validated_candidates="$(
   "$os_tcb_env" -i PATH=/usr/bin:/usr/local/bin:/bin \
     "$python_binary" -I -S - "$python_binary" 2>/dev/null <<'PY'
+from __future__ import annotations
+
 import os
 import stat
 import sys

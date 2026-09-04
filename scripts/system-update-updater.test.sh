@@ -214,6 +214,7 @@ write_fake_tools() {
 #!/volume4/.finance-reconciliation-test-bin/python3
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import os
 import sys
@@ -296,6 +297,15 @@ except ValueError:
 script = sys.stdin.read()
 
 sys.argv = ["-", *sys.argv[stdin_index + 1:]]
+execution_globals = {"__name__": "__main__"}
+if scenario == "python38_compatibility":
+    class Python38Set:
+        def __new__(cls, *args, **kwargs):
+            return set(*args, **kwargs)
+
+    python38_builtins = vars(builtins).copy()
+    python38_builtins["set"] = Python38Set
+    execution_globals["__builtins__"] = python38_builtins
 validation_scenarios = {
     "recovery_image_mismatch",
     "recovery_ref_mismatch",
@@ -307,7 +317,7 @@ is_updater_validation = "expected_image_id = Path(sys.argv[5])" in script
 validation_phase = "recovery" if any("recovery-updater" in value for value in sys.argv[1:]) else "new"
 validation_status = 0
 try:
-    exec(compile(script, "<stdin>", "exec"), {"__name__": "__main__"})
+    exec(compile(script, "<stdin>", "exec", dont_inherit=True), execution_globals)
 except SystemExit as error:
     validation_status = error.code if isinstance(error.code, int) else 1
     raise
@@ -1734,6 +1744,9 @@ if [ "${FINREC_TEST_BATCH:-}" = "DSM_TCB" ]; then
   printf 'services: {}\n' >"$suite_dir/compose.yml"
   sudo -n install -o root -g root -m 0644 "$suite_dir/compose.yml" "$fixed_app_dir/compose.yml"
   run_update_case "tcb_preflight" 0
+  assert_target_env
+  assert_success_order
+  run_update_case "python38_compatibility" 0
   assert_target_env
   assert_success_order
   printf 'system-update-updater DSM trusted candidate contract tests passed\n'
