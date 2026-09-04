@@ -387,15 +387,40 @@ if os.environ.get("FINREC_FAKE_DOCKER_PREFLIGHT") != "1":
     if private_parent is None or not private_parent.name.startswith("finance-reconciliation-updater-update."):
         raise SystemExit(88)
     plugin_directory = os.environ.get("DOCKER_CLI_PLUGIN_EXTRA_DIRS")
-    plugin_path = Path("/usr/lib/docker/cli-plugins/docker-compose")
+    plugin_path = Path(plugin_directory) / "docker-compose"
     plugin_stat = plugin_path.lstat()
-    if (
-        plugin_directory != str(plugin_path.parent)
-        or not stat.S_ISREG(plugin_stat.st_mode)
-        or plugin_stat.st_uid != 0
-        or plugin_stat.st_gid != 0
-        or stat.S_IMODE(plugin_stat.st_mode) != 0o755
-    ):
+    if plugin_directory == "/usr/local/lib/docker/cli-plugins":
+        shim_path = Path("/usr/local/bin/docker-compose")
+        resolved_path = Path(
+            "/volume4/@appstore/ContainerManager/usr/bin/docker-compose"
+        )
+        shim_stat = shim_path.lstat()
+        resolved_stat = resolved_path.lstat()
+        plugin_valid = (
+            stat.S_ISLNK(plugin_stat.st_mode)
+            and plugin_stat.st_uid == 0
+            and plugin_stat.st_gid == 0
+            and os.readlink(plugin_path) == "/usr/local/bin/docker-compose"
+            and stat.S_ISLNK(shim_stat.st_mode)
+            and shim_stat.st_uid == 0
+            and shim_stat.st_gid == 0
+            and os.readlink(shim_path)
+            == "/var/packages/ContainerManager/target/usr/bin/docker-compose"
+            and plugin_path.resolve(strict=True) == resolved_path
+            and stat.S_ISREG(resolved_stat.st_mode)
+            and resolved_stat.st_uid == 0
+            and resolved_stat.st_gid == 0
+            and stat.S_IMODE(resolved_stat.st_mode) == 0o755
+        )
+    else:
+        plugin_valid = (
+            plugin_directory == str(plugin_path.parent)
+            and stat.S_ISREG(plugin_stat.st_mode)
+            and plugin_stat.st_uid == 0
+            and plugin_stat.st_gid == 0
+            and stat.S_IMODE(plugin_stat.st_mode) == 0o755
+        )
+    if not plugin_valid:
         raise SystemExit(87)
 
 CONTROL_PATH = Path("/volume4/.finance-reconciliation-updater-fake")

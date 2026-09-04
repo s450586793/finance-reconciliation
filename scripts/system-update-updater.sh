@@ -133,9 +133,20 @@ python_candidate = sys.argv[1]
 binary_parents = {Path("/usr/bin"), Path("/usr/local/bin")}
 synology_docker = Path("/usr/local/bin/docker")
 synology_docker_target = "/var/packages/ContainerManager/target/usr/bin/docker"
+synology_compose_plugin = Path(
+    "/usr/local/lib/docker/cli-plugins/docker-compose"
+)
+synology_compose_plugin_target = "/usr/local/bin/docker-compose"
+synology_compose_shim = Path(synology_compose_plugin_target)
+synology_compose_shim_target = (
+    "/var/packages/ContainerManager/target/usr/bin/docker-compose"
+)
 synology_package_link = Path("/var/packages/ContainerManager/target")
 synology_package_target = "/volume4/@appstore/ContainerManager"
 synology_docker_resolved = Path("/volume4/@appstore/ContainerManager/usr/bin/docker")
+synology_compose_resolved = Path(
+    "/volume4/@appstore/ContainerManager/usr/bin/docker-compose"
+)
 plugin_parents = {
     Path("/usr/lib/docker/cli-plugins"),
     Path("/usr/libexec/docker/cli-plugins"),
@@ -212,6 +223,34 @@ def validate_synology_docker_link(requested: Path, resolved: Path) -> None:
     validate_directory_chain(synology_docker_resolved.parent)
 
 
+def validate_synology_compose_plugin_link(
+    requested: Path, resolved: Path
+) -> None:
+    if (
+        requested != synology_compose_plugin
+        or os.readlink(requested) != synology_compose_plugin_target
+        or resolved != synology_compose_resolved
+    ):
+        raise ValueError("unexpected Synology Compose plugin candidate")
+    validate_requested_parents(synology_compose_shim)
+    shim_value = synology_compose_shim.lstat()
+    if (
+        not stat.S_ISLNK(shim_value.st_mode)
+        or shim_value.st_uid != 0
+        or os.readlink(synology_compose_shim) != synology_compose_shim_target
+    ):
+        raise ValueError("unsafe Synology Compose shim")
+    validate_directory_chain(synology_package_link.parent)
+    package_link_value = synology_package_link.lstat()
+    if (
+        not stat.S_ISLNK(package_link_value.st_mode)
+        or package_link_value.st_uid != 0
+        or os.readlink(synology_package_link) != synology_package_target
+    ):
+        raise ValueError("unsafe Synology package link")
+    validate_directory_chain(synology_compose_resolved.parent)
+
+
 def validate_candidate(raw_path: str, allowed_parents: set[Path]) -> str:
     requested = Path(raw_path)
     requested_value = requested.lstat()
@@ -226,7 +265,12 @@ def validate_candidate(raw_path: str, allowed_parents: set[Path]) -> str:
     validate_requested_parents(requested)
     resolved = requested.resolve(strict=True)
     if resolved.parent not in allowed_parents:
-        validate_synology_docker_link(requested, resolved)
+        if requested == synology_docker:
+            validate_synology_docker_link(requested, resolved)
+        elif requested == synology_compose_plugin:
+            validate_synology_compose_plugin_link(requested, resolved)
+        else:
+            raise ValueError("unexpected resolved candidate")
     validate_directory_chain(resolved.parent)
     resolved_value = resolved.stat()
     if (

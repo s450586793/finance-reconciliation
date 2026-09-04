@@ -147,12 +147,24 @@ if [ "${1:-}" = "--inside" ]; then
     /usr/bin/install -o root -g root -m 0755 \
       "$fake_dir/docker" \
       "$rootfs/volume4/@appstore/ContainerManager/usr/bin/docker"
+    /usr/bin/install -o root -g root -m 0755 \
+      "$fake_dir/docker" \
+      "$rootfs/volume4/@appstore/ContainerManager/usr/bin/docker-compose"
     /usr/bin/ln -s \
       /volume4/@appstore/ContainerManager \
       "$rootfs/var/packages/ContainerManager/target"
     /usr/bin/ln -s \
       /var/packages/ContainerManager/target/usr/bin/docker \
       "$rootfs/usr/local/bin/docker"
+    /usr/bin/rm -f "$rootfs/usr/lib/docker/cli-plugins/docker-compose"
+    /usr/bin/install -d -o root -g root -m 0755 \
+      "$rootfs/usr/local/lib/docker/cli-plugins"
+    /usr/bin/ln -s \
+      /var/packages/ContainerManager/target/usr/bin/docker-compose \
+      "$rootfs/usr/local/bin/docker-compose"
+    /usr/bin/ln -s \
+      /usr/local/bin/docker-compose \
+      "$rootfs/usr/local/lib/docker/cli-plugins/docker-compose"
     docker_smoke_paths=(
       /volume4/@appstore/ContainerManager/usr/bin/docker
       /volume4/@appstore/ContainerManager/usr/bin/docker
