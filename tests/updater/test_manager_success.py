@@ -65,10 +65,12 @@ class RecordingStore(FileStateStore):
 class FakePlatform:
     def __init__(self):
         self.current = image("v0.2.0", digest="sha256:current")
+        self.original = self.current
         self.stable = image("v0.2.1")
         self.calls: list[str] = []
         self.health_targets: list[ImageIdentity] = []
         self.fail_cleanup = False
+        self.initial_health_failures_remaining = 0
         self.fail_inspect_after: int | None = None
         self.inspect_calls = 0
         self.cleanup_observations: list[tuple[CleanupStep, CleanupStepStatus]] = []
@@ -155,7 +157,15 @@ class FakePlatform:
         self.current = target
         self._call("start_target")
 
+    def start_rollback(self, task: UpdateTask) -> None:
+        self.current = self.original
+        self._call("start_rollback")
+
     def health(self, expected: ImageIdentity | None = None) -> None:
+        if expected == self.original:
+            self.health_targets.append(expected)
+            self._call("health_rollback")
+            return
         assert expected == self.stable
         self.health_targets.append(expected)
         task = self._state().task
@@ -168,6 +178,9 @@ class FakePlatform:
             return
         self._block("health_target")
         self.calls.append("health_target")
+        if self.initial_health_failures_remaining:
+            self.initial_health_failures_remaining -= 1
+            raise SafeOperationError("health_check_failed")
 
     def persist_version(self, version: str) -> None:
         assert version == self.stable.version
@@ -642,6 +655,28 @@ def test_stabilization_uses_three_fixed_delayed_health_probes(manager, platform)
 
     assert sleeps == [5, 5, 5]
     assert platform.health_targets == [platform.stable] * 4
+
+
+def test_target_start_health_retries_until_web_becomes_ready(
+    manager, store, platform
+):
+    platform.initial_health_failures_remaining = 2
+    sleeps = []
+    manager._sleeper = sleeps.append
+    manager.check()
+    _task, execute = manager.start("v0.2.1")
+
+    execute()
+
+    task = store.load().task
+    assert task is not None
+    assert task.stage is Stage.SUCCEEDED
+    assert sum(
+        stage is Stage.CHECKING_HEALTH
+        for name, stage in platform.stage_at_call
+        if name == "health_target"
+    ) == 3
+    assert sleeps == [2, 2, 5, 5, 5]
 
 
 def test_cleanup_failure_leaves_a_successful_task_pending_cleanup(

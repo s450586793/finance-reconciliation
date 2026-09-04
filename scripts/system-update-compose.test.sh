@@ -161,6 +161,13 @@ if "env_file" in web:
     raise SystemExit("web must not receive deployment-only release environment")
 if web["environment"].get("DJANGO_SETTINGS_MODULE") != "config.settings.prod":
     raise SystemExit("web must use production Django settings")
+allowed_hosts = {
+    host.strip()
+    for host in web["environment"].get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+}
+if "web" not in allowed_hosts:
+    raise SystemExit("web must accept its internal Compose service hostname")
 if web["environment"].get("DATABASE_URL", "").endswith("/finance_reconciliation") is not True:
     raise SystemExit("web database must target finance_reconciliation")
 if web["environment"].get("FINREC_UPDATER_TOKEN") != "u" * 32 or updater["environment"].get("FINREC_UPDATER_TOKEN") != "u" * 32:

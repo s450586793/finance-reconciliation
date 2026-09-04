@@ -41,6 +41,7 @@ class FailurePlatform:
         self.failure = failure
         self.fail_rollback = False
         self.fail_rollback_health = False
+        self.rollback_health_failures_remaining = 0
         self.fail_version_restore = False
         self.calls: list[str] = []
         self.persisted_versions: list[str] = []
@@ -94,7 +95,9 @@ class FailurePlatform:
         assert expected is not None
         if self._matches_runtime_identity(expected, self.original):
             self.calls.append("health_rollback")
-            if self.fail_rollback_health:
+            if self.fail_rollback_health or self.rollback_health_failures_remaining:
+                if self.rollback_health_failures_remaining:
+                    self.rollback_health_failures_remaining -= 1
                 raise SafeOperationError("health_check_failed")
             assert self.current == self.original
             return
@@ -277,3 +280,41 @@ def test_rollback_failure_requires_manual_intervention_without_cleanup(
     assert task.public_view().error_code == "rollback_failed"
     assert task.public_view().error_message == "升级失败，需要人工处理。"
     assert platform.cleanup_calls == []
+
+
+def test_rollback_health_retries_until_original_web_becomes_ready(
+    manager_factory, store
+):
+    platform = FailurePlatform("migrate_target")
+    platform.rollback_health_failures_remaining = 2
+    manager = manager_factory(platform)
+    sleeps = []
+    manager._sleeper = sleeps.append
+
+    run_started_task(manager)
+
+    task = store.load().task
+    assert task is not None
+    assert task.stage is Stage.FAILED
+    assert task.rolled_back is True
+    assert platform.calls.count("health_rollback") == 3
+    assert sleeps == [2, 2]
+
+
+def test_rollback_health_exhaustion_requires_manual_intervention(
+    manager_factory, store
+):
+    platform = FailurePlatform("migrate_target")
+    platform.fail_rollback_health = True
+    manager = manager_factory(platform)
+    sleeps = []
+    manager._sleeper = sleeps.append
+
+    run_started_task(manager)
+
+    task = store.load().task
+    assert task is not None
+    assert task.stage is Stage.MANUAL_INTERVENTION
+    assert task.rolled_back is False
+    assert platform.calls.count("health_rollback") == 30
+    assert sleeps == [2] * 29

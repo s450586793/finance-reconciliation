@@ -32,6 +32,8 @@ class UpdateConflict(RuntimeError):
 
 class UpdateManager:
     _CHECK_MAX_AGE = timedelta(minutes=2)
+    _STARTUP_HEALTH_MAX_ATTEMPTS = 30
+    _STARTUP_HEALTH_RETRY_SECONDS = 2
     _PRE_TAG_STAGES = frozenset(
         {Stage.CHECKING, Stage.BACKING_UP, Stage.PULLING}
     )
@@ -232,7 +234,7 @@ class UpdateManager:
                 self._platform.start_target(task.target, task_id=task.id)
 
                 self._checkpoint(task_id, Stage.CHECKING_HEALTH)
-                self._platform.health(expected=self._task(task_id).target)
+                self._wait_for_startup_health(self._task(task_id).target)
                 self._stabilize(task_id)
 
                 self._checkpoint(task_id, Stage.PERSISTING_VERSION)
@@ -306,7 +308,7 @@ class UpdateManager:
             task = self._task(task_id)
             self._platform.start_rollback(task)
             self._checkpoint(task_id, checkpoint_stage)
-            self._platform.health(expected=task.original)
+            self._wait_for_startup_health(task.original)
             if restore_original_version:
                 self._checkpoint(task_id, checkpoint_stage)
                 self._platform.persist_version(task.original.version)
@@ -314,6 +316,16 @@ class UpdateManager:
             self._finish_manual(task_id)
             return
         self._finish_failed(task_id, code, rolled_back=True)
+
+    def _wait_for_startup_health(self, expected: ImageIdentity) -> None:
+        for attempt in range(self._STARTUP_HEALTH_MAX_ATTEMPTS):
+            try:
+                self._platform.health(expected=expected)
+                return
+            except SafeOperationError:
+                if attempt + 1 == self._STARTUP_HEALTH_MAX_ATTEMPTS:
+                    raise
+                self._sleeper(self._STARTUP_HEALTH_RETRY_SECONDS)
 
     def _stabilize(self, task_id: UUID) -> None:
         self._checkpoint(task_id, Stage.STABILIZING)
