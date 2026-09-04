@@ -31,4 +31,4 @@ test -s "$dump_path"
 test -s "$archive_path"
 printf 'DB_BACKUP=%s\n' "$dump_path"
 printf 'UPLOADS_BACKUP=%s\n' "$archive_path"
-find "$backup_dir" -maxdepth 1 -type f \( -name 'db-*.dump' -o -name 'uploads-*.tar.gz' \) -mtime +30 -delete
+find "$backup_dir" -maxdepth 1 -type f \( -name 'db-*.dump' -o -name 'uploads-*.tar.gz' \) -mtime +30 -exec rm -f -- {} +

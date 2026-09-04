@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -1000,6 +1001,10 @@ def test_backup_script_emits_manifest_only_after_nonempty_final_backups(
     use_relative_directories,
     private_recovery_directory,
 ):
+    busybox = shutil.which("busybox") if private_recovery_directory else None
+    if private_recovery_directory and busybox is None:
+        pytest.skip("BusyBox is required for the production find compatibility case")
+
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     backup_dir = tmp_path / "backups"
@@ -1039,6 +1044,8 @@ def test_backup_script_emits_manifest_only_after_nonempty_final_backups(
     )
     for command in fake_bin.iterdir():
         command.chmod(0o755)
+    if busybox is not None:
+        (fake_bin / "find").symlink_to(busybox)
 
     environment = os.environ.copy()
     working_directory = tmp_path if use_relative_directories else Path.cwd()
