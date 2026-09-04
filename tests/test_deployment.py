@@ -979,15 +979,35 @@ def test_production_settings_normalize_valid_company_tax_id():
 
 
 @pytest.mark.parametrize(
-    ("pg_dump_content", "fail_archive_move", "use_relative_directories"),
-    [("dump", False, False), ("dump", False, True), ("", False, False), ("dump", True, False)],
+    (
+        "pg_dump_content",
+        "fail_archive_move",
+        "use_relative_directories",
+        "private_recovery_directory",
+    ),
+    [
+        ("dump", False, False, False),
+        ("dump", False, True, False),
+        ("", False, False, False),
+        ("dump", True, False, False),
+        ("dump", False, False, True),
+    ],
 )
 def test_backup_script_emits_manifest_only_after_nonempty_final_backups(
-    tmp_path, pg_dump_content, fail_archive_move, use_relative_directories
+    tmp_path,
+    pg_dump_content,
+    fail_archive_move,
+    use_relative_directories,
+    private_recovery_directory,
 ):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    if private_recovery_directory:
+        private_directory = backup_dir / "manual-recovery"
+        private_directory.mkdir()
+        private_directory.chmod(0o000)
     uploads_dir = tmp_path / "uploads"
     uploads_dir.mkdir()
     (uploads_dir / "invoice.pdf").write_bytes(b"uploaded document")
@@ -1017,11 +1037,6 @@ def test_backup_script_emits_manifest_only_after_nonempty_final_backups(
         "/bin/mv \"$@\"\n",
         encoding="utf-8",
     )
-    (fake_bin / "find").write_text(
-        "#!/bin/sh\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
     for command in fake_bin.iterdir():
         command.chmod(0o755)
 
@@ -1043,14 +1058,18 @@ def test_backup_script_emits_manifest_only_after_nonempty_final_backups(
             "PATH": f"{fake_bin}:{environment['PATH']}",
         }
     )
-    result = subprocess.run(
-        ["sh", str(Path.cwd() / "scripts" / "backup.sh")],
-        cwd=working_directory,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["sh", str(Path.cwd() / "scripts" / "backup.sh")],
+            cwd=working_directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        if private_recovery_directory:
+            private_directory.chmod(0o700)
 
     if fail_archive_move or not pg_dump_content:
         assert result.returncode != 0
